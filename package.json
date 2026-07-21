@@ -9,6 +9,8 @@
     "start": "tsx index.ts",
     "test": "vitest",
     "typecheck": "tsc --noEmit",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },
