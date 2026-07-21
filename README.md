@@ -1,7 +1,7 @@
 [README.md](https://github.com/user-attachments/files/30198023/README.md)
 # Task Management Tool
 
-A REST API for team task management — the backend behind something like Linear, Jira, or Trello.
+A mini REST API for team task management — the backend behind something like Linear, Jira, or Trello.
 
 Multi-tenant organizations, teams, projects, and tasks with role-based authorization, JWT session auth with refresh token rotation, and Redis for rate limiting and session state.
 
