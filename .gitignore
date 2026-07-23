@@ -7,3 +7,8 @@ node_modules/
 dist/
 coverage/
 *.log
+
+# Claude Code tooling — local config and installed skills, not application code
+.claude/
+.agents/
+skills-lock.json
