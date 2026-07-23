@@ -62,23 +62,21 @@ organizationRouter.get('/', auth, async (req, res) => {
   res.json({ success: true, userId: req.user!.sub, organizations: listedOrgs })
 })
 organizationRouter.get('/:orgId', auth, loadMembership, async (req, res) => {
-  const orgId = Number(req.params.orgId)
   const [org] = await db.select({id: organizations.id, name: organizations.name, slug: organizations.slug, createdAt: organizations.createdAt})
     .from(organizations)
-    .where(eq(organizations.id, orgId))
+    .where(eq(organizations.id, req.membership!.organizationId))
     .limit(1)
   if (!org) throw new NotFoundError('Organization not found')
   res.json({ success: true, organization: {...org, role: req.membership!.role} })
 })
 organizationRouter.patch('/:orgId', auth, loadMembership,requireRole("admin"), async (req, res) => {
   const result = updateOrgSchema.safeParse(req.body)
-  const orgId = Number(req.params.orgId)
   if (!result.success) throw new ValidationError(result.error.flatten())
   const data = result.data
   try {
     const [updated] = await db.update(organizations)
       .set(data)
-      .where(eq(organizations.id, orgId))
+      .where(eq(organizations.id, req.membership!.organizationId))
       .returning()
     res.json({success:true,organization: updated})
   } catch (err) {
@@ -89,9 +87,8 @@ organizationRouter.patch('/:orgId', auth, loadMembership,requireRole("admin"), a
   }
 })
 organizationRouter.delete('/:orgId', auth, loadMembership, requireRole("owner"), async (req, res) => {
-  const orgId = Number(req.params.orgId)
   const [deleted] = await db.delete(organizations)
-    .where(eq(organizations.id, orgId))
+    .where(eq(organizations.id, req.membership!.organizationId))
     .returning()
   if (!deleted) throw new NotFoundError('Organization not found')
   res.json({ success: true, organization: deleted })

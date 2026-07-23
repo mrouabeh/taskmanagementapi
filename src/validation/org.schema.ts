@@ -15,7 +15,6 @@ export const createOrgSchema = z.object({
     .optional(),
   
 })
-
 // PATCH: any subset of the create fields, but the body can't be empty.
 export const updateOrgSchema = createOrgSchema
   .partial()
