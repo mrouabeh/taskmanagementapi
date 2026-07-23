@@ -5,7 +5,7 @@ A mini REST API for team task management — the backend behind something like L
 
 Multi-tenant organizations, teams, projects, and tasks with role-based authorization, JWT session auth with refresh token rotation, and Redis for rate limiting and session state.
 
-> **Status: in progress.** Authentication is complete and hardened. The relational schema is designed and migrated. Endpoints for organizations, teams, projects, and tasks are the current work. See [Build Status](#build-status) for exactly what is and isn't implemented — nothing in this README describes code that doesn't exist.
+> **Status: in progress.** Authentication is complete and hardened. The relational schema is designed and migrated. Organization CRUD with per-organization role authorization is implemented; endpoints for teams, projects, and tasks are the current work. See [Build Status](#build-status) for exactly what is and isn't implemented — nothing in this README describes code that doesn't exist.
 
 Backend-only by design. The deliverable is the API: its schema, its authorization model, and its documentation.
 
@@ -43,14 +43,16 @@ Backend-only by design. The deliverable is the API: its schema, its authorizatio
 | Error handling | Typed `AppError` hierarchy, single error middleware |
 | Env validation | Zod-parsed at boot, process exits on invalid config |
 | Database schema | Users, organizations, memberships, teams, projects, activity logs — migrated |
+| Organization endpoints | Full CRUD: create (creator becomes owner), list-mine, read, update, delete |
+| Per-organization authorization | `requireRole` resolves the caller's role per org; non-members get 404, under-privileged members 403 |
 
 ### Not yet built
 
 | Area | Notes |
 |---|---|
 | Tasks, comments, attachments, labels | Tables not yet in the schema |
-| Organization / team / project endpoints | Tables exist, routes do not |
-| Permission enforcement | Role enum exists; no checks wired up yet |
+| Team / project endpoints | Tables exist, routes do not |
+| Member management | Inviting users, changing roles, and removing members are not built |
 | Email verification, password reset | Planned |
 | Search, filtering, pagination, sorting | Planned |
 | Notifications | Planned |
@@ -371,8 +373,10 @@ Being explicit about what would need to change before this ran in production:
 
 - [ ] Tasks: title, description, assignee, creator, due date, priority, labels, status
 - [ ] Comments and attachments
-- [ ] Organization / team / project CRUD endpoints
-- [ ] Permission middleware enforcing the four roles per resource
+- [x] Organization CRUD endpoints
+- [ ] Team / project CRUD endpoints
+- [x] Permission middleware enforcing the four roles per organization
+- [ ] Member management: invitations, role changes, removal
 - [ ] Email verification and password reset
 - [ ] Search, filtering, cursor pagination, sorting
 - [ ] Notifications

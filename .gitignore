@@ -12,3 +12,6 @@ coverage/
 .claude/
 .agents/
 skills-lock.json
+
+# Redis persistence dump (created at runtime, never source)
+dump.rdb
