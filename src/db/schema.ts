@@ -21,10 +21,10 @@ export const activityLogs = pgTable("activity_logs", {
 ]);
 
 export const memberships = pgTable("memberships", {
-	id: bigint({ mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-	userRole: userRole("user_role").default("guest"),
+	id: bigint({ mode: 'number' }).primaryKey().generatedAlwaysAsIdentity().notNull(),
+	userRole: userRole("user_role").default("guest").notNull(),
 	userId: bigint("user_id", { mode: 'number' }).references(() => users.id),
-	organizationId: bigint("organization_id", { mode: 'number' }).references(() => organizations.id, { onDelete: "cascade" } ),
+	organizationId: bigint("organization_id", { mode: 'number' }).notNull().references(() => organizations.id, { onDelete: "cascade" } ),
 }, (table) => [
 	unique("ck").on(table.userId, table.organizationId),]);
 
