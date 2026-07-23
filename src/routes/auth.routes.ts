@@ -169,8 +169,11 @@ router.post("/register",rateLimiter,async (req,res)=>{
         insertResult = await db.insert(users).values({name, email:normalizedEmail, hashedpassword:hashedPassword}).returning({id:users.id,email:users.email})
     } catch (err) {
         // Two concurrent signups can both pass the check above; the unique index
-        // is what actually decides. 23505 = unique_violation.
-        if ((err as { code?: string })?.code === '23505') {
+        // is what actually decides. 23505 = unique_violation. drizzle 1.0-rc wraps
+        // DB errors, so the code can sit on `.cause` rather than the top level.
+        const code = (err as { code?: string })?.code
+            ?? (err as { cause?: { code?: string } })?.cause?.code
+        if (code === '23505') {
             throw new ConflictError("A user with this email already exists!")
         }
         throw err

@@ -6,7 +6,7 @@ import { createOrgSchema } from '../validation/org.schema'
 import { ConflictError, ValidationError } from "../lib/errors";
 
 
-const router = Router()
+const organizationRouter = Router()
 function slugify(text: string): string {
   return text
     .normalize('NFD')                   // Separate base characters from accent marks (e.g., 'é' -> 'e' + '´')
@@ -17,7 +17,7 @@ function slugify(text: string): string {
     .replace(/\s+/g, '-')               // Replace one or more spaces with a single dash
     .replace(/-+/g, '-');              // Replace multiple consecutive dashes with a single dash
 }
-router.post('/', auth, async (req, res) => {
+organizationRouter.post('/', auth, async (req, res) => {
   const result = createOrgSchema.safeParse(req.body)
   if (!result.success){
       throw new ValidationError(result.error.flatten())
@@ -32,7 +32,11 @@ router.post('/', auth, async (req, res) => {
         return org
       })
     } catch (err) {
-      if ((err as { code?: string })?.code === '23505') {
+      // drizzle 1.0-rc wraps DB errors in a DrizzleQueryError, so the Postgres
+      // error code lives on `.cause`; a plain query would expose it at the top.
+      const code = (err as { code?: string })?.code
+        ?? (err as { cause?: { code?: string } })?.cause?.code
+      if (code === '23505') {
         throw new ConflictError('An organization with this slug already exists')
       }
       throw err
@@ -40,4 +44,4 @@ router.post('/', auth, async (req, res) => {
   
     res.status(201).json({ success: true, organization: insertedOrg })
   })
-export default router;
+export default organizationRouter;
