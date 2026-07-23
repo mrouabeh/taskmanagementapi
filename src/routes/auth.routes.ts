@@ -9,7 +9,7 @@ import {loginUserSchema, registerUserSchema} from "../validation/auth.schema";
 import bcrypt from "bcrypt";
 import jwt, {JwtPayload} from "jsonwebtoken";
 import {env} from "../config/env";
-import {redisClient} from "../redis"
+import { redisClient } from "../redis"
 const DUMMY_HASH="$2b$10$KIqRWTBXtc/obFflqazVnuCWXlQynmdTqcjNJbKCwPheOxXpsFqEG"
 const router = Router()
 
