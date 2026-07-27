@@ -6,6 +6,7 @@ import { createOrgSchema, updateOrgSchema } from '../validation/org.schema'
 import { ConflictError, ValidationError , NotFoundError} from "../lib/errors";
 import { eq } from 'drizzle-orm'
 import { loadMembership, requireRole } from '../middleware/requireRole'
+import membershipRouter from './membership.routes'
 
 
 const organizationRouter = Router()
@@ -94,4 +95,9 @@ organizationRouter.delete('/:orgId', auth, loadMembership, requireRole("owner"),
   res.json({ success: true, organization: deleted })
   
 })
+organizationRouter.use('/:orgId/members', membershipRouter)
+// Nested router: it declares `mergeParams` so `:orgId` reaches its handlers,
+// and applies `auth` + `loadMembership` at its own mount point.
+organizationRouter.use('/:orgId/members', membershipRouter)
+
 export default organizationRouter;

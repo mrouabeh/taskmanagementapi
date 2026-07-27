@@ -4,7 +4,7 @@ import { db } from "../db"
 import { memberships } from "../db/schema"
 import { ForbiddenError, NotFoundError } from "../lib/errors"
 
-const ROLE_RANK = { guest: 0, member: 1, admin: 2, owner: 3 } as const 
+export const ROLE_RANK = { guest: 0, member: 1, admin: 2, owner: 3 } as const
 export type Role = keyof typeof ROLE_RANK
 
 export const loadMembership: RequestHandler = async (req, res, next) => {
