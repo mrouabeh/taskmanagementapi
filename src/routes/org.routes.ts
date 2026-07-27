@@ -95,9 +95,8 @@ organizationRouter.delete('/:orgId', auth, loadMembership, requireRole("owner"),
   res.json({ success: true, organization: deleted })
   
 })
-organizationRouter.use('/:orgId/members', membershipRouter)
-// Nested router: it declares `mergeParams` so `:orgId` reaches its handlers,
-// and applies `auth` + `loadMembership` at its own mount point.
+
+
 organizationRouter.use('/:orgId/members', membershipRouter)
 
 export default organizationRouter;
