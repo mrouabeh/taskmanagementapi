@@ -5,7 +5,7 @@ import {db} from "../db";
 import { memberships, users } from "../db/schema";
 import { ValidationError, NotFoundError, ConflictError, ForbiddenError } from '../lib/errors'
 import {eq,and} from "drizzle-orm";
-import { addMemberSchema,membershipIdParamSchema } from '../validation/membership.schema';
+import { addMemberSchema,membershipIdParamSchema,updateMemberRoleSchema } from '../validation/membership.schema';
 
 function assertCanManage(actor: Role, target: Role) {
   if (ROLE_RANK[target] >= ROLE_RANK.admin && actor !== 'owner') throw new ForbiddenError()
@@ -57,18 +57,29 @@ membershipRouter.post('/', requireRole('admin'), async (req, res) => {
     }
   
 })
-membershipRouter.delete('/:membershipId', requireRole('admin'), async (req, res) => {
+// No `requireRole` gate: removing *someone else* needs admin, but removing your
+// own membership is how you leave, and any member may do that. The distinction
+// needs the target row, so it is enforced inside the transaction below.
+membershipRouter.delete('/:membershipId', async (req, res) => {
   const safeParams = membershipIdParamSchema.safeParse(req.params)
   if (!safeParams.success) throw new ValidationError(safeParams.error.flatten())
   const { membershipId } = safeParams.data
+  // Deleting your own membership is how you leave an organization. The
+  // last-owner check below is what stops the final owner from orphaning it.
   const organizationId = req.membership!.organizationId
   const deleted = await db.transaction(async (tx) => {
     const [target] = await tx.select({ id: memberships.id, role: memberships.userRole })
       .from(memberships)
       .where(and(eq(memberships.id, membershipId), eq(memberships.organizationId, organizationId)))
+      .for('update')
       .limit(1)
     if (!target) throw new NotFoundError('Membership not found')
-    assertCanManage(req.membership!.role, target.role)
+    // Leaving is always allowed; removing anyone else needs admin rank and
+    // still obeys the owner-only ceiling.
+    if (target.id !== req.membership!.id) {
+      if (ROLE_RANK[req.membership!.role] < ROLE_RANK.admin) throw new ForbiddenError()
+      assertCanManage(req.membership!.role, target.role)
+    }
     if (target.role === 'owner') {
       const owners = await tx.select({ id: memberships.id })
         .from(memberships)
@@ -85,5 +96,43 @@ membershipRouter.delete('/:membershipId', requireRole('admin'), async (req, res)
     return row
   })
   res.json({ success: true, membership: deleted })
+})
+membershipRouter.patch('/:membershipId', requireRole('admin'), async (req, res) => {
+  const safeParams = membershipIdParamSchema.safeParse(req.params)
+  if (!safeParams.success) throw new ValidationError(safeParams.error.flatten())
+  const body = updateMemberRoleSchema.safeParse(req.body)
+  if (!body.success) throw new ValidationError(body.error.flatten())
+  const { membershipId } = safeParams.data
+  const { role } = body.data
+  if (membershipId === req.membership!.id && role !== req.membership!.role) {
+    throw new ForbiddenError('You cannot modify your own role.')
+  }
+  const organizationId = req.membership!.organizationId
+  const updated = await db.transaction(async (tx) => {
+    const [target] = await tx.select({id : memberships.id, role: memberships.userRole})
+      .from(memberships)
+      .where(and(eq(memberships.id, membershipId), eq(memberships.organizationId, organizationId)))
+      .for('update')
+      .limit(1)
+    if (!target) throw new NotFoundError('Membership not found')
+    assertCanManage(req.membership!.role, target.role)
+    assertCanManage(req.membership!.role, role)
+    if (target.role === 'owner' && role !== 'owner') {
+      const owners = await tx.select({ id: memberships.id })
+        .from(memberships)
+        .where(and(
+          eq(memberships.organizationId, organizationId),
+          eq(memberships.userRole, 'owner'),
+        ))
+        .for('update')
+      if (owners.length <= 1) throw new ConflictError('Organisation must have one owner at least')
+    }
+    const [row] = await tx.update(memberships)
+      .set({ userRole: role })
+      .where(eq(memberships.id, membershipId))
+      .returning()
+    return row
+  })
+  res.status(200).json({ success: true, membership: updated })
 })
 export default membershipRouter

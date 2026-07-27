@@ -15,7 +15,7 @@ export const loadMembership: RequestHandler = async (req, res, next) => {
     throw new NotFoundError("Organization not found")
   }
   const rows = await db
-         .select({ role: memberships.userRole })
+         .select({ id: memberships.id, role: memberships.userRole })
          .from(memberships)
          .where(and(
              eq(memberships.userId, req.user!.sub),
@@ -23,7 +23,7 @@ export const loadMembership: RequestHandler = async (req, res, next) => {
          ))
     .limit(1)
   if (!rows[0]) throw new NotFoundError("Organization not found")
-  req.membership = { organizationId: orgId, role: rows[0].role }
+  req.membership = { id: rows[0].id, organizationId: orgId, role: rows[0].role }
   next()
   
 }

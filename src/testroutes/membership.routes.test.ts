@@ -264,4 +264,136 @@ describe('DELETE /orgs/:orgId/members/:membershipId', () => {
 
         expect((await owner.delete(`/orgs/${id}/members/12abc`)).status).toBe(400)
     })
+
+    // Leaving an org is just deleting your own membership — allowed at any rank.
+    it('lets a plain member leave by removing their own membership', async () => {
+        const id = await freshOrg('leave')
+        const [own] = await db.insert(memberships)
+            .values({ userId: memberId, organizationId: id, userRole: 'member' }).returning()
+
+        expect((await member.delete(`/orgs/${id}/members/${own.id}`)).status).toBe(200)
+
+        const rows = await db.select().from(memberships).where(eq(memberships.id, own.id))
+        expect(rows).toHaveLength(0)
+    })
+
+    it('lets an admin leave, which the ceiling would otherwise block', async () => {
+        const id = await freshOrg('admin-leave')
+        const [own] = await db.insert(memberships)
+            .values({ userId: adminId, organizationId: id, userRole: 'admin' }).returning()
+
+        expect((await admin.delete(`/orgs/${id}/members/${own.id}`)).status).toBe(200)
+    })
+
+    // Dropping the route-level requireRole must not let members remove others.
+    it('still blocks a member from removing somebody else', async () => {
+        const id = await freshOrg('member-remove')
+        await db.insert(memberships).values({ userId: memberId, organizationId: id, userRole: 'member' })
+        const [victim] = await db.insert(memberships)
+            .values({ userId: guestId, organizationId: id, userRole: 'guest' }).returning()
+
+        expect((await member.delete(`/orgs/${id}/members/${victim.id}`)).status).toBe(403)
+
+        const rows = await db.select().from(memberships).where(eq(memberships.id, victim.id))
+        expect(rows).toHaveLength(1)
+    })
+})
+
+describe('PATCH /orgs/:orgId/members/:membershipId', () => {
+    it('lets an admin change a plain member role', async () => {
+        const id = await freshOrg('promote')
+        await db.insert(memberships).values({ userId: adminId, organizationId: id, userRole: 'admin' })
+        const [target] = await db.insert(memberships)
+            .values({ userId: memberId, organizationId: id, userRole: 'guest' }).returning()
+
+        const res = await admin.patch(`/orgs/${id}/members/${target.id}`).send({ role: 'member' })
+
+        expect(res.status).toBe(200)
+        expect(res.body.membership.userRole).toBe('member')
+    })
+
+    it('lets an owner grant admin', async () => {
+        const id = await freshOrg('grant-admin')
+        const [target] = await db.insert(memberships)
+            .values({ userId: memberId, organizationId: id, userRole: 'member' }).returning()
+
+        const res = await owner.patch(`/orgs/${id}/members/${target.id}`).send({ role: 'admin' })
+
+        expect(res.status).toBe(200)
+        expect(res.body.membership.userRole).toBe('admin')
+    })
+
+    // Ceiling, upward: checked against the role being granted.
+    it('stops an admin from promoting anyone to admin or owner', async () => {
+        const id = await freshOrg('ceiling-up')
+        await db.insert(memberships).values({ userId: adminId, organizationId: id, userRole: 'admin' })
+        const [target] = await db.insert(memberships)
+            .values({ userId: memberId, organizationId: id, userRole: 'member' }).returning()
+
+        expect((await admin.patch(`/orgs/${id}/members/${target.id}`).send({ role: 'owner' })).status).toBe(403)
+        expect((await admin.patch(`/orgs/${id}/members/${target.id}`).send({ role: 'admin' })).status).toBe(403)
+
+        const [after] = await db.select().from(memberships).where(eq(memberships.id, target.id))
+        expect(after.userRole).toBe('member')   // unchanged
+    })
+
+    // Ceiling, downward: checked against the target's current role.
+    it('stops an admin from demoting an owner', async () => {
+        const id = await freshOrg('ceiling-down')
+        await db.insert(memberships).values({ userId: adminId, organizationId: id, userRole: 'admin' })
+        const [ownerRow] = await db.select().from(memberships)
+            .where(and(eq(memberships.organizationId, id), eq(memberships.userRole, 'owner')))
+
+        expect((await admin.patch(`/orgs/${id}/members/${ownerRow.id}`).send({ role: 'guest' })).status).toBe(403)
+
+        const [after] = await db.select().from(memberships).where(eq(memberships.id, ownerRow.id))
+        expect(after.userRole).toBe('owner')
+    })
+
+    // Self-guard: nobody edits their own role, so no self-promotion and no
+    // self-demotion. This is what makes the last-owner branch below unreachable
+    // via PATCH — it stays as defence in depth.
+    it('refuses to let anyone change their own role', async () => {
+        const id = await freshOrg('demote-last')
+        const [ownerRow] = await db.select().from(memberships)
+            .where(and(eq(memberships.organizationId, id), eq(memberships.userRole, 'owner')))
+
+        expect((await owner.patch(`/orgs/${id}/members/${ownerRow.id}`).send({ role: 'member' })).status).toBe(403)
+
+        const [after] = await db.select().from(memberships).where(eq(memberships.id, ownerRow.id))
+        expect(after.userRole).toBe('owner')
+    })
+
+    // owner -> owner is a no-op and must not trip the last-owner guard.
+    it('allows a no-op re-set of the sole owner', async () => {
+        const id = await freshOrg('noop-owner')
+        const [ownerRow] = await db.select().from(memberships)
+            .where(and(eq(memberships.organizationId, id), eq(memberships.userRole, 'owner')))
+
+        expect((await owner.patch(`/orgs/${id}/members/${ownerRow.id}`).send({ role: 'owner' })).status).toBe(200)
+    })
+
+    // Org scoping — this is the case that caught the missing WHERE clause.
+    it('404s on a membership id from another organization', async () => {
+        const mine = await freshOrg('patch-mine')
+        const other = await freshOrg('patch-other')
+        await db.insert(memberships).values({ userId: adminId, organizationId: mine, userRole: 'admin' })
+        const [foreign] = await db.insert(memberships)
+            .values({ userId: memberId, organizationId: other, userRole: 'member' }).returning()
+
+        expect((await admin.patch(`/orgs/${mine}/members/${foreign.id}`).send({ role: 'guest' })).status).toBe(404)
+
+        const [after] = await db.select().from(memberships).where(eq(memberships.id, foreign.id))
+        expect(after.userRole).toBe('member')   // untouched
+    })
+
+    // Body validation — an unknown role must 400, not slip past the ceiling into a 500.
+    it('400s on a role outside the enum, and on an empty body', async () => {
+        const id = await freshOrg('bad-role')
+        const [target] = await db.insert(memberships)
+            .values({ userId: memberId, organizationId: id, userRole: 'member' }).returning()
+
+        expect((await owner.patch(`/orgs/${id}/members/${target.id}`).send({ role: 'superadmin' })).status).toBe(400)
+        expect((await owner.patch(`/orgs/${id}/members/${target.id}`).send({})).status).toBe(400)
+    })
 })
