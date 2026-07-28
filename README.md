@@ -44,23 +44,26 @@ Backend-only by design. The deliverable is the API: its schema, its authorizatio
 | Env validation | Zod-parsed at boot, process exits on invalid config |
 | Database schema | Users, organizations, memberships, teams, projects, activity logs — migrated |
 | Organization endpoints | Full CRUD: create (creator becomes owner), list-mine, read, update, delete |
+| Member endpoints | Roster, add by email, change role, remove — with an owner-only ceiling and a last-owner guard |
+| Team endpoints | Full CRUD scoped to an organization; delete refuses while the team still has projects |
 | Per-organization authorization | `requireRole` resolves the caller's role per org; non-members get 404, under-privileged members 403 |
+| Docker Compose | Postgres and Redis via `npm run db:up` |
+| Tests | 40 integration tests (auth, organizations, memberships) against a real Postgres and Redis |
 
 ### Not yet built
 
 | Area | Notes |
 |---|---|
 | Tasks, comments, attachments, labels | Tables not yet in the schema |
-| Team / project endpoints | Tables exist, routes do not |
-| Member management | Inviting users, changing roles, and removing members are not built |
+| Project endpoints | Table exists, routes do not |
+| Team tests | Team routes are verified manually but have no committed suite |
+| Team membership | No `team_members` table — any org member reaches every team |
 | Email verification, password reset | Planned |
 | Search, filtering, pagination, sorting | Planned |
 | Notifications | Planned |
 | Redis caching of org/task data | Redis currently serves auth and rate limiting only |
 | Service / repository layers | Routes currently query the database directly |
-| Docker Compose | Planned |
 | OpenAPI docs | Planned |
-| Tests | `vitest` and `supertest` installed, no suites written |
 
 ---
 
@@ -86,8 +89,9 @@ Express 5 matters here: it forwards rejected promises from async handlers to the
 ### Prerequisites
 
 - Node.js 20+
-- A running PostgreSQL instance
-- A running Redis instance on `localhost:6379`
+- Docker, for `npm run db:up` — it starts Postgres on `5432` and Redis on `6379`
+
+If you already run Postgres or Redis natively on those ports, the containers will not bind and the app will silently use your local servers instead. That works, but they are then the databases the tests read and write.
 
 ### Setup
 
@@ -144,6 +148,8 @@ Two separate secrets, not one. If they were shared, an access token would be a s
 
 ## API Reference
 
+Every response carries a `success` boolean. Errors are uniform: `{ success, code, message, details? }`.
+
 Base path: `/auth`
 
 Authentication is cookie-based. The browser sends `token` and `refreshToken` automatically; there is no `Authorization` header. Both cookies are `httpOnly` and `sameSite: strict`, and `secure` in production.
@@ -193,6 +199,53 @@ Requires authentication. Returns the current user, or `401` if the token is vali
 ```json
 { "success": true, "user": { "id": 1, "name": "Mohamed", "email": "m@example.com" } }
 ```
+
+---
+
+Base path: `/orgs`
+
+Every route below requires authentication. Routes carrying `:orgId` run through `loadMembership`, which resolves the caller's role in that organization and returns `404` — not `403` — when they are not a member, so a private organization is indistinguishable from one that does not exist.
+
+### Organizations
+
+| Method | Path | Min role | Notes |
+|---|---|---|---|
+| `POST` | `/orgs` | — | Creator becomes `owner`. `409` on a duplicate slug |
+| `GET` | `/orgs` | — | Organizations the caller belongs to, with their role in each |
+| `GET` | `/orgs/:orgId` | `member` | |
+| `PATCH` | `/orgs/:orgId` | `admin` | `409` on a duplicate slug |
+| `DELETE` | `/orgs/:orgId` | `owner` | Cascades to memberships, teams, projects, and activity logs |
+
+### Members
+
+| Method | Path | Min role | Notes |
+|---|---|---|---|
+| `GET` | `/orgs/:orgId/members` | `member` | Roster joined to `users` for email and name |
+| `POST` | `/orgs/:orgId/members` | `admin` | Body `{ email, role? }`; `404` if no such user, `409` if already a member |
+| `PATCH` | `/orgs/:orgId/members/:membershipId` | `admin` | Body `{ role }` |
+| `DELETE` | `/orgs/:orgId/members/:membershipId` | any member for self | Removing anyone else needs `admin` |
+
+Two invariants are enforced here:
+
+**Owner-only ceiling.** Granting or touching an `admin` or `owner` membership requires `owner`. Without it any admin could mint a peer or a superior and the hierarchy would mean nothing.
+
+**Last-owner guard.** The final `owner` cannot be removed or demoted (`409`). No route grants a role from outside an organization, so an organization that reaches zero owners is permanently unadministrable.
+
+Deleting your own membership is how you leave an organization, which is why `DELETE` has no route-level role gate — the check distinguishes self-removal from removing somebody else. Changing your *own* role is always refused, so nobody self-promotes.
+
+### Teams
+
+| Method | Path | Min role | Notes |
+|---|---|---|---|
+| `GET` | `/orgs/:orgId/teams` | `member` | |
+| `POST` | `/orgs/:orgId/teams` | `admin` | Body `{ name }`; `409` on a duplicate name **within the org** |
+| `GET` | `/orgs/:orgId/teams/:teamId` | `member` | |
+| `PATCH` | `/orgs/:orgId/teams/:teamId` | `admin` | Body `{ name }` — renaming is the only mutation |
+| `DELETE` | `/orgs/:orgId/teams/:teamId` | `admin` | `409` while the team still has projects |
+
+`organizationId` is never accepted from a request body. It comes from the URL segment that `loadMembership` already validated, which is what stops an admin of one organization from writing into another. Every `:teamId` and `:membershipId` lookup is filtered by organization for the same reason — a real id belonging to somebody else's organization returns `404`.
+
+`DELETE` on a team refuses while projects exist because `projects.team_id` cascades: without the check, one request would silently destroy every project in the team. Note this is application-level policy over a database-level cascade — deleting the *organization* still takes the whole tree with it.
 
 ---
 
@@ -324,7 +377,7 @@ Fixed-window counter in Redis, keyed by IP, applied to the auth routes:
 
 ```ts
 const currentRequests = await redisClient.incr(key)
-if (currentRequests === 1) await redisClient.expire(key, 60)
+if (currentRequests === 1) await redisClient.expire(key, 30)
 ```
 
 `INCR` on a missing key creates it at 1, which is the signal to set the window's TTL. When the limit trips, `TooManyRequestsError` carries the key's remaining TTL, and the error middleware surfaces it as a `Retry-After` header so clients know exactly when to retry instead of hammering blindly.
@@ -361,11 +414,13 @@ Middleware order in `app.ts` is load-bearing: `notFoundHandler` sits after all r
 Being explicit about what would need to change before this ran in production:
 
 - **Rate limiting is per-IP and fixed-window.** Users behind a shared NAT share a bucket, and the window boundary allows a burst of up to 2× the limit across two adjacent windows. A sliding window or token bucket keyed per user would be the fix. The `INCR`/`EXPIRE` pair is also two round trips — if the process dies between them the key never expires. A Lua script or `SET NX` would make it atomic.
-- **The current limit is 5 requests/minute**, which is a development value, not a production one.
+- **The current limit is 5 requests per 30 seconds**, which is a development value, not a production one.
 - **The Redis client uses default connection settings** rather than a configurable URL, so it only talks to `localhost:6379`.
 - **Route handlers query the database directly.** As the domain logic grows past authentication, this needs the service/repository split so that permission checks live in one enforceable layer.
 - **`users.hashedpassword` is nullable**, which anticipates OAuth accounts but currently just means the login path has to defend against it.
-- **No tests yet.** `vitest` and `supertest` are installed; the auth flows — particularly refresh reuse detection — are the first things that need coverage.
+- **Tests share one real database.** There are no mocks and no separate test database, so `vitest.config.ts` sets `fileParallelism: false` and each suite deletes the rows it created. Fast and honest about SQL behaviour, but it means the suite cannot run without `npm run db:up`.
+- **Team routes have no committed tests.** They were verified manually against the running database; the organization and membership suites are the pattern to follow.
+- **Teams are not an access boundary.** There is no `team_members` table, so every member of an organization implicitly reaches every team in it. This has to be settled before project routes decide who can see what.
 
 ---
 
@@ -374,14 +429,18 @@ Being explicit about what would need to change before this ran in production:
 - [ ] Tasks: title, description, assignee, creator, due date, priority, labels, status
 - [ ] Comments and attachments
 - [x] Organization CRUD endpoints
-- [ ] Team / project CRUD endpoints
+- [x] Team CRUD endpoints
+- [ ] Project CRUD endpoints
 - [x] Permission middleware enforcing the four roles per organization
-- [ ] Member management: invitations, role changes, removal
+- [x] Member management: adding by email, role changes, removal, self-service leaving
+- [ ] Invitations for users who have not registered yet
+- [ ] `team_members` join table, if teams should gate access
 - [ ] Email verification and password reset
 - [ ] Search, filtering, cursor pagination, sorting
 - [ ] Notifications
 - [ ] Redis caching for organization membership and task lists
 - [ ] Service and repository layers
-- [ ] Docker Compose (API, Postgres, Redis)
+- [x] Docker Compose (Postgres, Redis)
 - [ ] OpenAPI spec and Swagger UI
-- [ ] Integration test suite
+- [x] Integration test suite — auth, organizations, memberships
+- [ ] Test coverage for team routes

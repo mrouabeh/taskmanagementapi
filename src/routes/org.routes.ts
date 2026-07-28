@@ -7,6 +7,7 @@ import { ConflictError, ValidationError , NotFoundError} from "../lib/errors";
 import { eq } from 'drizzle-orm'
 import { loadMembership, requireRole } from '../middleware/requireRole'
 import membershipRouter from './membership.routes'
+import teamRouter from './teams.routes'
 
 
 const organizationRouter = Router()
@@ -98,5 +99,9 @@ organizationRouter.delete('/:orgId', auth, loadMembership, requireRole("owner"),
 
 
 organizationRouter.use('/:orgId/members', membershipRouter)
+organizationRouter.use('/:orgId/teams', teamRouter)
+
+
+
 
 export default organizationRouter;
