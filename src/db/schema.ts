@@ -23,10 +23,11 @@ export const activityLogs = pgTable("activity_logs", {
 export const memberships = pgTable("memberships", {
 	id: bigint({ mode: 'number' }).primaryKey().generatedAlwaysAsIdentity().notNull(),
 	userRole: userRole("user_role").default("guest").notNull(),
-	userId: bigint("user_id", { mode: 'number' }).references(() => users.id),
+	userId: bigint("user_id", { mode: 'number' }).notNull().references(() => users.id, { onDelete: "cascade" } ),
 	organizationId: bigint("organization_id", { mode: 'number' }).notNull().references(() => organizations.id, { onDelete: "cascade" } ),
 }, (table) => [
-	unique("ck").on(table.userId, table.organizationId),]);
+	unique("ck").on(table.userId, table.organizationId),
+	index("memberships_organization_id_idx").using("btree", table.organizationId.asc().nullsLast()),]);
 
 export const organizations = pgTable("organizations", {
 	id: bigint({ mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
@@ -50,9 +51,9 @@ export const projects = pgTable("projects", {
 
 export const teams = pgTable("teams", {
 	id: bigint({ mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-	name: varchar({ length: 100 }),
-	createdAt: timestamp("created_at").default(sql`now()`),
-	organizationId: bigint("organization_id", { mode: 'number' }).references(() => organizations.id),
+	name: varchar({ length: 100 }).notNull(),
+	createdAt: timestamp("created_at").default(sql`now()`).notNull(),
+	organizationId: bigint("organization_id", { mode: 'number' }).notNull().references(() => organizations.id, { onDelete: "cascade" }),
 }, (table) => [
 	unique("teams_org_name_unique").on(table.organizationId, table.name),]);
 
