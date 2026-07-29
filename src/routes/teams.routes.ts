@@ -100,9 +100,6 @@ teamRouter.delete('/:teamId', requireRole('admin'), async (req, res) => {
       .limit(1)
       .for('update')
     if (!team) throw new NotFoundError('Team not found')
-    // No `.for('update')` here: row locks do not block INSERTs, so locking the
-    // existing projects would not stop a new one appearing. The lock on the
-    // team row above is what a future create-project route contends on.
     const [project] = await tx.select({ id: projects.id })
       .from(projects)
       .where(eq(projects.teamId, teamId))

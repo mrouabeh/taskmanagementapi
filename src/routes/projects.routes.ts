@@ -5,9 +5,9 @@ import { requireRole } from '../middleware/requireRole'
 import { and, eq } from 'drizzle-orm'
 import { ValidationError, ConflictError, NotFoundError } from '../lib/errors'
 import { createProjectSchema, updateProjectSchema, projectIdParamSchema } from '../validation/projects.schema'
+import { loadProject } from '../middleware/loadProject'
+import taskRouter from './tasks.routes'
 
-// `auth`, `loadMembership` and `loadTeam` all run on the parent chain before
-// this router is reached, so `req.membership` and `req.team` are already set.
 const projectRouter = Router({ mergeParams: true })
 
 projectRouter.get('/',requireRole('member'),async(req,res)=>{
@@ -104,5 +104,5 @@ projectRouter.patch('/:projectId',requireRole('member'),async(req,res)=>{
 
 })
 
-
+projectRouter.use('/:projectId/tasks', loadProject, taskRouter)
 export default projectRouter
