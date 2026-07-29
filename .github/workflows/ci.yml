@@ -47,8 +47,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
+
+      # package-lock.json is written by npm 11, which lays out nested optional
+      # dependencies differently from npm 10. Reading it with npm 10 reports
+      # present packages as "Missing from lock file", so pin the major rather
+      # than inherit whatever the Node image happens to bundle.
+      - name: Pin npm to the version that wrote the lockfile
+        run: npm install -g npm@11
 
       - run: npm ci
 
