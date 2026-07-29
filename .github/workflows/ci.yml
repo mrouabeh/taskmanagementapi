@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # The suite runs against a real Postgres and Redis — there are no mocks and
+    # no separate test database, so CI provisions the same pair docker-compose
+    # gives you locally.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: "123"
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:123@localhost:5432/postgres
+      REDIS_URL: redis://localhost:6379
+      # Throwaway values — the database and Redis are destroyed with the runner.
+      JWT_SECRET: ci-jwt-secret-not-a-real-key
+      REFRESH_SECRET: ci-refresh-secret-not-a-real-key
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Builds the schema from an empty database, so a broken migration chain
+      # fails here rather than on a deploy.
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npx vitest run
