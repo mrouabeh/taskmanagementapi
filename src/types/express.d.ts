@@ -6,7 +6,9 @@ declare global {
         interface Request {
             user?: { sub: number; jti: string; exp: number; sid: string }
             membership?: { id: number; organizationId: number; role: Role }
-
+            // Set by `loadTeam`, which has already scoped the lookup to
+            // `membership.organizationId` — so this id is safe to trust.
+            team?: { id: number }
         }
     }
 }
