@@ -1,11 +1,12 @@
-[README.md](https://github.com/user-attachments/files/30198023/README.md)
 # Task Management Tool
+
+[![CI](https://github.com/mrouabeh/taskmanagementapi/actions/workflows/ci.yml/badge.svg)](https://github.com/mrouabeh/taskmanagementapi/actions/workflows/ci.yml)
 
 A mini REST API for team task management — the backend behind something like Linear, Jira, or Trello.
 
 Multi-tenant organizations, teams, projects, and tasks with role-based authorization, JWT session auth with refresh token rotation, and Redis for rate limiting and session state.
 
-> **Status: in progress.** Authentication is complete and hardened. The relational schema is designed and migrated. Organization CRUD with per-organization role authorization is implemented; endpoints for teams, projects, and tasks are the current work. See [Build Status](#build-status) for exactly what is and isn't implemented — nothing in this README describes code that doesn't exist.
+> **Status: in progress.** Authentication, organizations, members, teams, projects, and tasks are implemented and covered by 78 integration tests that run against a real Postgres and Redis. Comments are migrated but have no routes yet. See [Build Status](#build-status) for exactly what is and isn't implemented — nothing in this README describes code that doesn't exist.
 
 Backend-only by design. The deliverable is the API: its schema, its authorization model, and its documentation.
 
@@ -42,22 +43,24 @@ Backend-only by design. The deliverable is the API: its schema, its authorizatio
 | Input validation | Zod schemas at the route boundary |
 | Error handling | Typed `AppError` hierarchy, single error middleware |
 | Env validation | Zod-parsed at boot, process exits on invalid config |
-| Database schema | Users, organizations, memberships, teams, projects, activity logs — migrated |
+| Database schema | Users, organizations, memberships, teams, projects, tasks, comments, activity logs — migrated |
 | Organization endpoints | Full CRUD: create (creator becomes owner), list-mine, read, update, delete |
 | Member endpoints | Roster, add by email, change role, remove — with an owner-only ceiling and a last-owner guard |
 | Team endpoints | Full CRUD scoped to an organization; delete refuses while the team still has projects |
 | Project endpoints | Full CRUD scoped to a team, with status transitions and archive tracking |
+| Task endpoints | Full CRUD scoped to a project: assignment, priority, due dates, completion tracking |
 | Per-organization authorization | `requireRole` resolves the caller's role per org; non-members get 404, under-privileged members 403 |
 | Docker Compose | Postgres and Redis via `npm run db:up` |
-| Tests | 68 integration tests against a real Postgres and Redis |
+| CI | GitHub Actions: migrations applied to an empty database, then typecheck and the full suite |
+| Tests | 78 integration tests against a real Postgres and Redis |
 
 ### Not yet built
 
 | Area | Notes |
 |---|---|
-| Tasks, comments, attachments, labels | Tables not yet in the schema |
+| Comment endpoints | Table migrated, routes do not exist |
+| Attachments, labels | Tables not yet in the schema |
 | Team membership | No `team_members` table — any org member reaches every team |
-| Project ownership | No `created_by` column, so any member may edit any project in their team |
 | Email verification, password reset | Planned |
 | Search, filtering, pagination, sorting | Planned |
 | Notifications | Planned |
@@ -265,6 +268,30 @@ Projects nest one level deeper, under `/orgs/:orgId/teams/:teamId/projects`. A `
 
 **`updatedAt` is written explicitly by the route.** The column has a `DEFAULT`, but Postgres only applies defaults on `INSERT` — it never touches a column on `UPDATE` unless the statement names it.
 
+### Tasks
+
+Base path: `/orgs/:orgId/teams/:teamId/projects/:projectId/tasks`
+
+| Method | Path | Min role | Notes |
+|---|---|---|---|
+| `GET` | `/` | `member` | every task in the project |
+| `POST` | `/` | `member` | `{ title, description?, status?, priority?, assigneeId?, dueDate? }` |
+| `GET` | `/:taskId` | `member` | |
+| `PATCH` | `/:taskId` | `member` | any subset of the mutable fields; an empty body is `400` |
+| `DELETE` | `/:taskId` | `admin` | cascades to the task's comments |
+
+Four levels of nesting, each narrowing the last: `loadMembership` resolves the caller's role in the organization, `loadTeam` confirms the team belongs to it, `loadProject` confirms the project belongs to the team. By the time a handler runs, `req.project` is trusted without re-checking, and every `:taskId` lookup is filtered by it — so a real task id from another project returns `404`.
+
+**`assigneeId` is checked against organization membership.** The foreign key only proves the user exists; assigning work to someone outside the organization would satisfy every database constraint. The route resolves a `memberships` row for that user in the caller's organization and returns `400` if there isn't one. This is the one authorization rule the schema cannot express.
+
+**`createdById` comes from the session, never the body.** Otherwise a caller could file tasks as somebody else.
+
+**`completedAt` is derived from `status`,** exactly like `archivedAt` on projects — set when the status becomes `done`, cleared when it moves away, and left untouched when `status` isn't part of the request. So renaming a finished task doesn't silently un-finish it.
+
+**`assigneeId: null` unassigns.** Omitting the field leaves the assignee alone; sending `null` clears it. Both are meaningful, which is why the field is nullable rather than merely optional — an unassigned task is a normal state, not a missing value.
+
+Tasks carry no unique constraint: two tasks may share a title within a project, unlike teams and projects, which are uniquely named within their parent.
+
 ---
 
 ## Authentication Design
@@ -331,7 +358,7 @@ Currently migrated:
 ```
 users ──< memberships >── organizations
                                │
-                               ├──< teams ──< projects
+                               ├──< teams ──< projects ──< tasks ──< comments
                                │
                                └──< activity_logs >── users
 ```
@@ -343,6 +370,8 @@ users ──< memberships >── organizations
 | `memberships` | Join table carrying the user's role in an organization |
 | `teams` | Scoped to an organization, unique name per org |
 | `projects` | Scoped to a team, unique name per team, status enum |
+| `tasks` | Scoped to a project; assignee, creator, priority, due date, status enum |
+| `comments` | Scoped to a task, authored by a user |
 | `activity_logs` | Append-only event record |
 
 ### Decisions
@@ -360,6 +389,10 @@ That constraint is what prevents a user from holding two conflicting roles in th
 **`activity_logs` is append-only** and uses a polymorphic `(entity_type, entity_id)` pair so any future entity can be logged without a new column — indexed as a composite, since the pair is only ever queried together.
 
 **Uniqueness is scoped, not global.** `UNIQUE (team_id, name)` on projects means two teams can each have a "Website" project, which is what you want in a multi-tenant system.
+
+**Deleting a user does not delete their work.** `memberships.user_id` cascades — a membership without a user is meaningless. But `tasks.assignee_id`, `tasks.created_by_id`, `projects.created_by_id`, and `comments.user_id` all use `ON DELETE SET NULL`, so the task stays and the author becomes unknown. That is why those columns are nullable: `SET NULL` requires it. The two directions look similar and mean opposite things.
+
+**`null` carries meaning, and a different one per column.** `tasks.assignee_id IS NULL` means unassigned — a real state, and the backlog you query for deliberately. `tasks.created_by_id IS NULL` means the account was deleted. `tasks.due_date IS NULL` means no deadline was ever promised, which is what keeps "overdue" meaningful instead of turning the whole backlog red.
 
 **Timestamps are `timestamptz`, not `timestamp`.** They began as `timestamp without time zone`, which quietly produced wrong data: `DEFAULT now()` stores local wall-clock, while an ORM serialising a JavaScript `Date` stores UTC. With the server on UTC+1, every project edited through the API ended up with an `updated_at` an hour *before* its `created_at`. `timestamptz` stores an absolute instant, so both writers agree regardless of who generates the value or where the server runs.
 
@@ -452,8 +485,9 @@ Being explicit about what would need to change before this ran in production:
 
 ## Roadmap
 
-- [ ] Tasks: title, description, assignee, creator, due date, priority, labels, status
-- [ ] Comments and attachments
+- [x] Tasks: title, description, assignee, creator, due date, priority, status
+- [ ] Labels
+- [ ] Comment endpoints (table migrated) and attachments
 - [x] Organization CRUD endpoints
 - [x] Team CRUD endpoints
 - [x] Project CRUD endpoints
@@ -468,4 +502,5 @@ Being explicit about what would need to change before this ran in production:
 - [ ] Service and repository layers
 - [x] Docker Compose (Postgres, Redis)
 - [ ] OpenAPI spec and Swagger UI
-- [x] Integration test suite — auth, organizations, memberships, teams, projects
+- [x] Integration test suite — auth, organizations, memberships, teams, projects, tasks
+- [x] CI on every push and pull request
