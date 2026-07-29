@@ -46,18 +46,18 @@ Backend-only by design. The deliverable is the API: its schema, its authorizatio
 | Organization endpoints | Full CRUD: create (creator becomes owner), list-mine, read, update, delete |
 | Member endpoints | Roster, add by email, change role, remove — with an owner-only ceiling and a last-owner guard |
 | Team endpoints | Full CRUD scoped to an organization; delete refuses while the team still has projects |
+| Project endpoints | Full CRUD scoped to a team, with status transitions and archive tracking |
 | Per-organization authorization | `requireRole` resolves the caller's role per org; non-members get 404, under-privileged members 403 |
 | Docker Compose | Postgres and Redis via `npm run db:up` |
-| Tests | 40 integration tests (auth, organizations, memberships) against a real Postgres and Redis |
+| Tests | 68 integration tests against a real Postgres and Redis |
 
 ### Not yet built
 
 | Area | Notes |
 |---|---|
 | Tasks, comments, attachments, labels | Tables not yet in the schema |
-| Project endpoints | Table exists, routes do not |
-| Team tests | Team routes are verified manually but have no committed suite |
 | Team membership | No `team_members` table — any org member reaches every team |
+| Project ownership | No `created_by` column, so any member may edit any project in their team |
 | Email verification, password reset | Planned |
 | Search, filtering, pagination, sorting | Planned |
 | Notifications | Planned |
@@ -247,6 +247,24 @@ Deleting your own membership is how you leave an organization, which is why `DEL
 
 `DELETE` on a team refuses while projects exist because `projects.team_id` cascades: without the check, one request would silently destroy every project in the team. Note this is application-level policy over a database-level cascade — deleting the *organization* still takes the whole tree with it.
 
+### Projects
+
+| Method | Path | Min role | Notes |
+|---|---|---|---|
+| `GET` | `…/teams/:teamId/projects` | `member` | |
+| `POST` | `…/teams/:teamId/projects` | `member` | Body `{ name, description?, status? }`; `409` on a duplicate name **within the team** |
+| `GET` | `…/projects/:projectId` | `member` | |
+| `PATCH` | `…/projects/:projectId` | `member` | Any subset of `{ name, description, status }`; an empty body is `400` |
+| `DELETE` | `…/projects/:projectId` | `admin` | |
+
+Projects nest one level deeper, under `/orgs/:orgId/teams/:teamId/projects`. A `loadTeam` middleware resolves `:teamId` scoped to the caller's organization before any handler runs, so a team id from another organization is a `404` regardless of which project route was addressed. Every `:projectId` lookup is then filtered by team, so a real project id belonging to a different team is also a `404`.
+
+**Writes are `member`, deletion is `admin`.** Everything a member can do is reversible — rename, re-describe, or set `status: 'archived'` to shelve a project. Only the irreversible operation is gated, and archiving gives members a way to clear finished work without needing an admin.
+
+**`archivedAt` is derived, never accepted.** The update schema rejects it outright; the route sets it whenever `status` changes and clears it when the status moves away from `archived`. That keeps the timestamp and the enum from ever disagreeing. Sending only a `name` leaves an archived project's timestamp untouched.
+
+**`updatedAt` is written explicitly by the route.** The column has a `DEFAULT`, but Postgres only applies defaults on `INSERT` — it never touches a column on `UPDATE` unless the statement names it.
+
 ---
 
 ## Authentication Design
@@ -343,6 +361,8 @@ That constraint is what prevents a user from holding two conflicting roles in th
 
 **Uniqueness is scoped, not global.** `UNIQUE (team_id, name)` on projects means two teams can each have a "Website" project, which is what you want in a multi-tenant system.
 
+**Timestamps are `timestamptz`, not `timestamp`.** They began as `timestamp without time zone`, which quietly produced wrong data: `DEFAULT now()` stores local wall-clock, while an ORM serialising a JavaScript `Date` stores UTC. With the server on UTC+1, every project edited through the API ended up with an `updated_at` an hour *before* its `created_at`. `timestamptz` stores an absolute instant, so both writers agree regardless of who generates the value or where the server runs.
+
 ---
 
 ## Error Handling
@@ -397,11 +417,16 @@ src
 ├── config/            # zod-validated env
 ├── db/                # drizzle client, schema, relations
 ├── lib/               # AppError hierarchy
-├── middleware/        # auth, rate limiter, error handler
+├── middleware/        # auth, rate limiter, error handler, resource loaders
 ├── routes/            # route handlers
+├── testroutes/        # integration suites, run against the real database
 ├── validation/        # zod request schemas
 └── types/             # express request augmentation
 ```
+
+Routers nest to mirror the URL: `app.ts` mounts `/orgs`, which mounts `/:orgId/members` and `/:orgId/teams`, which in turn mounts `/:teamId/projects`. Every router in that chain sets `mergeParams: true` — without it a child sees none of its ancestors' params, `loadMembership` reads an undefined `:orgId`, and every nested route returns `404` no matter how correct the handler is.
+
+Access is resolved by middleware before any handler runs, each layer narrowing the last: `auth` establishes the user, `loadMembership` resolves their role in the organization, `loadTeam` confirms the team belongs to it. A handler that reaches `req.team` can trust it without re-checking.
 
 Middleware order in `app.ts` is load-bearing: `notFoundHandler` sits after all routes so it only runs when nothing matched, and `errorHandler` is mounted last because Express only recognizes error middleware that is both four-arity and registered after everything it protects.
 
@@ -419,8 +444,9 @@ Being explicit about what would need to change before this ran in production:
 - **Route handlers query the database directly.** As the domain logic grows past authentication, this needs the service/repository split so that permission checks live in one enforceable layer.
 - **`users.hashedpassword` is nullable**, which anticipates OAuth accounts but currently just means the login path has to defend against it.
 - **Tests share one real database.** There are no mocks and no separate test database, so `vitest.config.ts` sets `fileParallelism: false` and each suite deletes the rows it created. Fast and honest about SQL behaviour, but it means the suite cannot run without `npm run db:up`.
-- **Team routes have no committed tests.** They were verified manually against the running database; the organization and membership suites are the pattern to follow.
-- **Teams are not an access boundary.** There is no `team_members` table, so every member of an organization implicitly reaches every team in it. This has to be settled before project routes decide who can see what.
+- **Teams are not an access boundary.** There is no `team_members` table, so every member of an organization implicitly reaches every team in it — and therefore every project inside those teams.
+- **Projects have no owner.** Without a `created_by` column, "only the creator may edit this" is not expressible, so any member can edit or archive any project in their team.
+- **Migrations are not tracked in this database.** There is no `__drizzle_migrations` table — the schema was applied by hand rather than through `drizzle-kit migrate`, so running it here would try to replay every migration from the first `CREATE TABLE`. The migration files themselves are accurate and would apply cleanly to a fresh database.
 
 ---
 
@@ -430,7 +456,7 @@ Being explicit about what would need to change before this ran in production:
 - [ ] Comments and attachments
 - [x] Organization CRUD endpoints
 - [x] Team CRUD endpoints
-- [ ] Project CRUD endpoints
+- [x] Project CRUD endpoints
 - [x] Permission middleware enforcing the four roles per organization
 - [x] Member management: adding by email, role changes, removal, self-service leaving
 - [ ] Invitations for users who have not registered yet
@@ -442,5 +468,4 @@ Being explicit about what would need to change before this ran in production:
 - [ ] Service and repository layers
 - [x] Docker Compose (Postgres, Redis)
 - [ ] OpenAPI spec and Swagger UI
-- [x] Integration test suite — auth, organizations, memberships
-- [ ] Test coverage for team routes
+- [x] Integration test suite — auth, organizations, memberships, teams, projects

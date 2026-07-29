@@ -6,6 +6,8 @@ import { loadMembership, requireRole } from '../middleware/requireRole'
 import { and, eq } from 'drizzle-orm'
 import { ValidationError, ConflictError, NotFoundError } from '../lib/errors'
 import { createTeamSchema, teamIdParamSchema, updateTeamSchema } from '../validation/teams.schema'
+import { loadTeam } from '../middleware/loadTeam'
+import projectRouter from './projects.routes'
 
 const teamRouter = Router({ mergeParams: true })
 
@@ -113,4 +115,8 @@ teamRouter.delete('/:teamId', requireRole('admin'), async (req, res) => {
   })
   res.status(200).json({ success: true, team: deleted })
 })
+// Nested one level deeper: `loadTeam` resolves `:teamId` scoped to the caller's
+// organization, so every project handler can trust `req.team`.
+teamRouter.use('/:teamId/projects', loadTeam, projectRouter)
+
 export default teamRouter
