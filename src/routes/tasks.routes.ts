@@ -5,15 +5,13 @@ import { requireRole } from '../middleware/requireRole'
 import { and, eq } from 'drizzle-orm'
 import { ValidationError, NotFoundError } from '../lib/errors'
 import {createTaskSchema, taskIdParamSchema, updateTaskSchema} from '../validation/tasks.schema'
+import commentRouter from './comments.routes'
+import { loadTask } from '../middleware/loadTask'
 
-// `auth`, `loadMembership`, `loadTeam` and `loadProject` all run on the parent
-// chain, so `req.membership` and `req.project` are already set and scoped.
 const taskRouter = Router({ mergeParams: true })
 
-// A foreign key proves the user exists — not that they belong to this
-// organization. Nothing in the database can enforce that, so the route must.
 async function assertAssigneeIsMember(assigneeId: number | null | undefined, organizationId: number) {
-  if (assigneeId == null) return   // omitted or explicitly unassigned
+  if (assigneeId == null) return
   const [row] = await db.select({ id: memberships.id })
     .from(memberships)
     .where(and(
@@ -108,4 +106,5 @@ taskRouter.delete('/:taskId',requireRole('admin'),async(req,res)=>{
     res.status(200).json({ success: true, task: deleted })
 })
 
+taskRouter.use('/:taskId/comments', loadTask, commentRouter)
 export default taskRouter;

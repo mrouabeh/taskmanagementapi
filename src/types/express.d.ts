@@ -7,6 +7,7 @@ declare global {
             membership?: { id: number; organizationId: number; role: Role }
             team?: { id: number }
             project?: { id: number }
+            task?: { id: number }
         }
     }
 }

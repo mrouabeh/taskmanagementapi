@@ -8,10 +8,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-
-    # The suite runs against a real Postgres and Redis — there are no mocks and
-    # no separate test database, so CI provisions the same pair docker-compose
-    # gives you locally.
     services:
       postgres:
         image: postgres:16
@@ -37,7 +33,6 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:123@localhost:5432/postgres
       REDIS_URL: redis://localhost:6379
-      # Throwaway values — the database and Redis are destroyed with the runner.
       JWT_SECRET: ci-jwt-secret-not-a-real-key
       REFRESH_SECRET: ci-refresh-secret-not-a-real-key
       NODE_ENV: test
@@ -50,17 +45,9 @@ jobs:
           node-version: 24
           cache: npm
 
-      # package-lock.json is written by npm 11, which lays out nested optional
-      # dependencies differently from npm 10. Reading it with npm 10 reports
-      # present packages as "Missing from lock file", so pin the major rather
-      # than inherit whatever the Node image happens to bundle.
       - name: Pin npm to the version that wrote the lockfile
         run: npm install -g npm@11
-
       - run: npm ci
-
-      # Builds the schema from an empty database, so a broken migration chain
-      # fails here rather than on a deploy.
       - name: Apply migrations
         run: npm run db:migrate
 
