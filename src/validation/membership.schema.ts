@@ -1,11 +1,13 @@
 import { z } from 'zod'
 import { userRole } from '../db/schema'
 
-
 const roleSchema = z.enum(userRole.enumValues)
 
-
-const emailSchema = z.string().trim().toLowerCase().pipe(z.email({ message: "Invalid email" }))
+const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .pipe(z.email({ message: 'Invalid email' }))
 
 export const addMemberSchema = z.object({
   email: emailSchema,

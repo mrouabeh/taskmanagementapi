@@ -13,9 +13,9 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: "123"
+          POSTGRES_PASSWORD: '123'
           POSTGRES_DB: postgres
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -23,7 +23,7 @@ jobs:
           --health-retries 5
       redis:
         image: redis:7
-        ports: ["6379:6379"]
+        ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 10s

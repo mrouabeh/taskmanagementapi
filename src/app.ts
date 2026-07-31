@@ -1,7 +1,7 @@
-import {errorHandler, notFoundHandler} from "./middleware/errorHandler";
-import authRouter from "./routes/auth.routes";
-import cookieParser from "cookie-parser";
-import express from "express";
+import { errorHandler, notFoundHandler } from './middleware/errorHandler'
+import authRouter from './routes/auth.routes'
+import cookieParser from 'cookie-parser'
+import express from 'express'
 const app = express()
 import organizationRouter from './routes/org.routes'
 

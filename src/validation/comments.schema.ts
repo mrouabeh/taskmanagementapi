@@ -1,10 +1,10 @@
 import { z } from 'zod'
 
-const bodySchema = z.string()
+const bodySchema = z
+  .string()
   .trim()
-  .min(1, { message: "Comment cannot be empty" })
-  .max(300, { message: "Comment must be less or equal to 300 characters" })
-
+  .min(1, { message: 'Comment cannot be empty' })
+  .max(300, { message: 'Comment must be less or equal to 300 characters' })
 
 export const createCommentSchema = z.object({
   body: bodySchema,
