@@ -11,14 +11,18 @@ import teamRouter from './teams.routes'
 
 const organizationRouter = Router()
 function slugify(text: string): string {
-  return text
-    .normalize('NFD') // Separate base characters from accent marks (e.g., 'é' -> 'e' + '´')
-    .replace(/[\u0300-\u036f]/g, '') // Remove the accent marks
-    .toLowerCase() // Convert to lowercase
-    .trim() // Remove leading and trailing whitespace
-    .replace(/[^a-z0-9 -]/g, '') // Remove invalid characters (keep letters, numbers, spaces, and dashes)
-    .replace(/\s+/g, '-') // Replace one or more spaces with a single dash
-    .replace(/-+/g, '-') // Replace multiple consecutive dashes with a single dash
+  return (
+    text
+      // NFD splits accented characters into base + combining mark, so the next
+      // line can strip the marks and leave "café" as "cafe" rather than "caf".
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9 -]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+  )
 }
 organizationRouter.post('/', auth, async (req, res) => {
   const result = createOrgSchema.safeParse(req.body)

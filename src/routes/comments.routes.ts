@@ -26,8 +26,6 @@ async function loadEditableComment(req: Request, commentId: number) {
 }
 
 commentsRouter.get('/', requireRole('member'), async (req, res) => {
-  // A thread is the one list where order is part of the meaning — without an
-  // ORDER BY, Postgres may return rows in any order it likes.
   const selected = await db
     .select({
       id: comments.id,

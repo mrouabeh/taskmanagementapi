@@ -17,7 +17,6 @@ export const createTaskSchema = z.object({
   dueDate: dueDateSchema,
 })
 
-// PATCH: any subset of the mutable fields, but the body can't be empty.
 export const updateTaskSchema = z
   .object({
     title: titleSchema.optional(),

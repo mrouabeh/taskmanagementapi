@@ -35,8 +35,6 @@ async function resetRateLimit() {
   if (keys.length) await redisClient.del(keys)
 }
 
-// Each mutation test gets its own org so deletes in one can't disturb another.
-// The owner is created implicitly by POST /orgs.
 async function freshOrg(name: string) {
   const created = await owner.post('/orgs').send({ name, slug: `${name}-${stamp}` })
   return created.body.organization.id as number
@@ -71,7 +69,6 @@ beforeAll(async () => {
   outsiderId = o.body.user.id
   await outsider.post('/auth/login').send({ email: outsiderEmail, password })
 
-  // One org holding all three roles: owner (auto), member, guest.
   orgId = await freshOrg('roster')
   await db.insert(memberships).values([
     { userId: memberId, organizationId: orgId, userRole: 'member' },
@@ -177,7 +174,6 @@ describe('POST /orgs/:orgId/members', () => {
     )
   })
 
-  // The ceiling: this is the privilege-escalation guard.
   it('stops an admin from minting an owner or a peer admin', async () => {
     const id = await freshOrg('ceiling-add')
     await db.insert(memberships).values({ userId: adminId, organizationId: id, userRole: 'admin' })
@@ -191,7 +187,6 @@ describe('POST /orgs/:orgId/members', () => {
         .status,
     ).toBe(403)
 
-    // …and nothing was written on the way to that 403.
     const rows = await db
       .select()
       .from(memberships)
@@ -240,7 +235,6 @@ describe('DELETE /orgs/:orgId/members/:membershipId', () => {
     expect(rows).toHaveLength(0)
   })
 
-  // The ceiling again, on the removal side.
   it('stops an admin from removing an owner', async () => {
     const id = await freshOrg('ceiling-remove')
     await db.insert(memberships).values({ userId: adminId, organizationId: id, userRole: 'admin' })
@@ -255,7 +249,6 @@ describe('DELETE /orgs/:orgId/members/:membershipId', () => {
     expect(rows).toHaveLength(1) // still there
   })
 
-  // The guard that keeps an org administrable.
   it('refuses to remove the last owner', async () => {
     const id = await freshOrg('last-owner')
     const [ownerRow] = await db
@@ -281,7 +274,6 @@ describe('DELETE /orgs/:orgId/members/:membershipId', () => {
     expect((await owner.delete(`/orgs/${id}/members/${extra.id}`)).status).toBe(200)
   })
 
-  // Org scoping: the id is real, but it belongs to somebody else's org.
   it('404s on a membership id from another organization', async () => {
     const mine = await freshOrg('scope-mine')
     const other = await freshOrg('scope-other')
@@ -305,7 +297,6 @@ describe('DELETE /orgs/:orgId/members/:membershipId', () => {
     expect((await owner.delete(`/orgs/${id}/members/12abc`)).status).toBe(400)
   })
 
-  // Leaving an org is just deleting your own membership — allowed at any rank.
   it('lets a plain member leave by removing their own membership', async () => {
     const id = await freshOrg('leave')
     const [own] = await db
@@ -329,7 +320,6 @@ describe('DELETE /orgs/:orgId/members/:membershipId', () => {
     expect((await admin.delete(`/orgs/${id}/members/${own.id}`)).status).toBe(200)
   })
 
-  // Dropping the route-level requireRole must not let members remove others.
   it('still blocks a member from removing somebody else', async () => {
     const id = await freshOrg('member-remove')
     await db
@@ -375,7 +365,6 @@ describe('PATCH /orgs/:orgId/members/:membershipId', () => {
     expect(res.body.membership.userRole).toBe('admin')
   })
 
-  // Ceiling, upward: checked against the role being granted.
   it('stops an admin from promoting anyone to admin or owner', async () => {
     const id = await freshOrg('ceiling-up')
     await db.insert(memberships).values({ userId: adminId, organizationId: id, userRole: 'admin' })
@@ -395,7 +384,6 @@ describe('PATCH /orgs/:orgId/members/:membershipId', () => {
     expect(after.userRole).toBe('member') // unchanged
   })
 
-  // Ceiling, downward: checked against the target's current role.
   it('stops an admin from demoting an owner', async () => {
     const id = await freshOrg('ceiling-down')
     await db.insert(memberships).values({ userId: adminId, organizationId: id, userRole: 'admin' })
@@ -430,7 +418,6 @@ describe('PATCH /orgs/:orgId/members/:membershipId', () => {
     expect(after.userRole).toBe('owner')
   })
 
-  // owner -> owner is a no-op and must not trip the last-owner guard.
   it('allows a no-op re-set of the sole owner', async () => {
     const id = await freshOrg('noop-owner')
     const [ownerRow] = await db
@@ -443,7 +430,6 @@ describe('PATCH /orgs/:orgId/members/:membershipId', () => {
     ).toBe(200)
   })
 
-  // Org scoping — this is the case that caught the missing WHERE clause.
   it('404s on a membership id from another organization', async () => {
     const mine = await freshOrg('patch-mine')
     const other = await freshOrg('patch-other')
@@ -463,7 +449,6 @@ describe('PATCH /orgs/:orgId/members/:membershipId', () => {
     expect(after.userRole).toBe('member') // untouched
   })
 
-  // Body validation — an unknown role must 400, not slip past the ceiling into a 500.
   it('400s on a role outside the enum, and on an empty body', async () => {
     const id = await freshOrg('bad-role')
     const [target] = await db

@@ -45,9 +45,9 @@ membershipRouter.post('/', requireRole('admin'), async (req, res) => {
     insertResult = await db
       .insert(memberships)
       .values({
-        userId: userId[0].id, // resolved from the email, not the email itself
-        organizationId, // from req.membership!.organizationId
-        userRole: role, // from the parsed body
+        userId: userId[0].id,
+        organizationId,
+        userRole: role,
       })
       .returning()
     res.status(201).json({ success: true, member: insertResult[0] })
@@ -67,8 +67,6 @@ membershipRouter.delete('/:membershipId', async (req, res) => {
   const safeParams = membershipIdParamSchema.safeParse(req.params)
   if (!safeParams.success) throw new ValidationError(safeParams.error.flatten())
   const { membershipId } = safeParams.data
-  // Deleting your own membership is how you leave an organization. The
-  // last-owner check below is what stops the final owner from orphaning it.
   const organizationId = req.membership!.organizationId
   const deleted = await db.transaction(async (tx) => {
     const [target] = await tx
@@ -78,8 +76,6 @@ membershipRouter.delete('/:membershipId', async (req, res) => {
       .for('update')
       .limit(1)
     if (!target) throw new NotFoundError('Membership not found')
-    // Leaving is always allowed; removing anyone else needs admin rank and
-    // still obeys the owner-only ceiling.
     if (target.id !== req.membership!.id) {
       if (ROLE_RANK[req.membership!.role] < ROLE_RANK.admin) throw new ForbiddenError()
       assertCanManage(req.membership!.role, target.role)

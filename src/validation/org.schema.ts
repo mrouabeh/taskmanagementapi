@@ -16,7 +16,6 @@ export const createOrgSchema = z.object({
     .regex(slugPattern, { message: 'Slug must be lowercase letters, numbers, and single hyphens' })
     .optional(),
 })
-// PATCH: any subset of the create fields, but the body can't be empty.
 export const updateOrgSchema = createOrgSchema
   .partial()
   .refine((d) => Object.keys(d).length > 0, { message: 'At least one field is required' })

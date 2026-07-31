@@ -15,7 +15,6 @@ const adminEmail = `org-admin-${stamp}@example.com`
 const memberEmail = `org-member-${stamp}@example.com`
 const outsiderEmail = `org-outsider-${stamp}@example.com`
 
-// An agent remembers login cookies like a browser, so it stays logged in.
 const owner = request.agent(app)
 const admin = request.agent(app)
 const member = request.agent(app)

@@ -63,7 +63,6 @@ describe('projects GET routes', () => {
     expect(r.body.project).toHaveProperty('archivedAt')
   })
 
-  // The boundary: a real project id, but it belongs to a different team.
   it('404s a project id from another team', async () => {
     const r = await owner.get(`/orgs/${orgA}/teams/${teamA}/projects/${pOther}`)
     expect(r.status).toBe(404)

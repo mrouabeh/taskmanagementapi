@@ -109,8 +109,6 @@ teamRouter.delete('/:teamId', requireRole('admin'), async (req, res) => {
   })
   res.status(200).json({ success: true, team: deleted })
 })
-// Nested one level deeper: `loadTeam` resolves `:teamId` scoped to the caller's
-// organization, so every project handler can trust `req.team`.
 teamRouter.use('/:teamId/projects', loadTeam, projectRouter)
 
 export default teamRouter

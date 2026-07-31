@@ -82,7 +82,6 @@ describe('comments', () => {
     expect(r.body.comments.map((c: any) => c.body)).toEqual(['one', 'two', 'three'])
   })
 
-  // The rule requireRole cannot express.
   it('lets the author edit and delete their own comment', async () => {
     const c = (await member.post(url(taskA)).send({ body: 'mine' })).body.comment
 
