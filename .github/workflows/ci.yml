@@ -56,3 +56,6 @@ jobs:
 
       - name: Test
         run: npx vitest run
+
+      - name: Check formatting
+        run: npm run format:check
