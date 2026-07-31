@@ -18,5 +18,23 @@ export const loginUserSchema = z.object({
     .min(8, { message: 'Password must be at least 8 characters long' })
     .max(100, { message: 'Password is too long' }),
 })
+export const forgotPasswordSchema = z.object({
+  email: z.string().email({ message: 'Invalid email' }),
+})
+
+export const resetPasswordSchema = z.object({
+  token: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]+$/, { message: 'Invalid token' })
+    .min(20, { message: 'Invalid token' })
+    .max(200, { message: 'Invalid token' }),
+  password: z
+    .string()
+    .min(8, { message: 'Password must be at least 8 characters long' })
+    .max(100, { message: 'Password is too long' }),
+})
+
+export type forgotPasswordZ = z.infer<typeof forgotPasswordSchema>
+export type resetPasswordZ = z.infer<typeof resetPasswordSchema>
 export type registerUserZ = z.infer<typeof registerUserSchema>
 export type loginUserZ = z.infer<typeof loginUserSchema>
