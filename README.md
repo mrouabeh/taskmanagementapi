@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/mrouabeh/taskmanagementapi/actions/workflows/ci.yml/badge.svg)](https://github.com/mrouabeh/taskmanagementapi/actions/workflows/ci.yml)
 
-REST API for team task management. Organizations contain teams, teams contain projects,
+A mini REST API for team task management. Organizations contain teams, teams contain projects,
 projects contain tasks, tasks have comments. Everything is scoped per organization with
 role-based access, and sessions use JWTs in httpOnly cookies with refresh token rotation.
 
