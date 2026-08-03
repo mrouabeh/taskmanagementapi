@@ -2,22 +2,14 @@ import { Router } from 'express'
 import { ConflictError, InternalError, UnauthorizedError, ValidationError } from '../lib/errors'
 import { auth } from '../middleware/auth'
 import { db } from '../db'
-import { passwordResetTokens, users } from '../db/schema'
-import { and, eq, gt } from 'drizzle-orm'
-import { isOverLimit, rateLimiter } from '../middleware/rateLimiter'
-import {
-  forgotPasswordSchema,
-  loginUserSchema,
-  registerUserSchema,
-  resetPasswordSchema,
-} from '../validation/auth.schema'
+import { users } from '../db/schema'
+import { eq } from 'drizzle-orm'
+import { rateLimiter } from '../middleware/rateLimiter'
+import { loginUserSchema, registerUserSchema } from '../validation/auth.schema'
 import bcrypt from 'bcrypt'
 import jwt, { JwtPayload } from 'jsonwebtoken'
 import { env } from '../config/env'
 import { redisClient } from '../redis'
-import { randomBytes, createHash } from 'node:crypto'
-import { revokeAllSessions, trackSession, untrackSession } from '../lib/sessions'
-import { emailQueue, enqueueSafely } from '../queue/queues'
 const DUMMY_HASH = '$2b$10$KIqRWTBXtc/obFflqazVnuCWXlQynmdTqcjNJbKCwPheOxXpsFqEG'
 const router = Router()
 
@@ -81,8 +73,6 @@ router.post('/login', rateLimiter, async (req, res) => {
     jwtid: refreshJti,
   })
   await redisClient.set(`family:${sid}`, refreshJti, { EX: 60 * 60 * 24 * 30 })
-  // Reverse index, so a password reset can find and kill this session later.
-  await trackSession(user.id, sid)
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: env.NODE_ENV === 'production',
@@ -171,7 +161,6 @@ router.post('/logout', auth, async (req, res) => {
     await redisClient.set(`denylist:${jti}`, '1', { EX: ttl })
   }
   await redisClient.del(`family:${sid}`)
-  await untrackSession(req.user!.sub, sid)
   res.clearCookie('token', {
     httpOnly: true,
     secure: env.NODE_ENV === 'production',
@@ -233,62 +222,5 @@ router.post('/register', rateLimiter, async (req, res) => {
       email: newUser.email,
     },
   })
-})
-router.post('/forgot-password', rateLimiter, async (req, res) => {
-  const result = forgotPasswordSchema.safeParse(req.body)
-  if (!result.success) throw new ValidationError(result.error.flatten())
-  const email = result.data.email.toLowerCase().trim()
-  // Per-address cap on top of the per-IP middleware, so rotating IPs can't
-  // mailbomb one inbox. Tripping it returns the same body as everything else —
-  // a distinct response would itself say whether the address is registered.
-  const flooding = await isOverLimit(`rate:reset:${email}`, 3, 60 * 60)
-  const [user] = await db
-    .select({ id: users.id, email: users.email, name: users.name })
-    .from(users)
-    .where(eq(users.email, email))
-    .limit(1)
-  if (user && !flooding) {
-    const token = randomBytes(32).toString('base64url')
-    const tokenHash = createHash('sha256').update(token).digest('hex')
-    await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, user.id))
-    await db.insert(passwordResetTokens).values({
-      userId: user.id,
-      tokenHash,
-      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
-    })
-    // Swallows enqueue failures on purpose: throwing only for accounts that
-    // exist would turn a 500 into an account-enumeration oracle. The cost is a
-    // silent no-send, so this log needs to be one that alerting actually reads.
-    await enqueueSafely(emailQueue, 'password-reset', {
-      to: user.email,
-      name: user.name,
-      token,
-    })
-  }
-  // Identical response whether or not the address is registered.
-  return res.json({
-    success: true,
-    message: 'If that email is registered, a reset link has been sent.',
-  })
-})
-router.post('/reset-password', rateLimiter, async (req, res) => {
-  const result = resetPasswordSchema.safeParse(req.body)
-  if (!result.success) throw new ValidationError(result.error.flatten())
-  const { token, password } = result.data
-  const tokenHash = createHash('sha256').update(token).digest('hex')
-  const [row] = await db
-    .delete(passwordResetTokens)
-    .where(
-      and(
-        eq(passwordResetTokens.tokenHash, tokenHash),
-        gt(passwordResetTokens.expiresAt, new Date()),
-      ),
-    )
-    .returning({ userId: passwordResetTokens.userId })
-  if (!row) throw new UnauthorizedError('Invalid or expired reset token')
-  const hashedPassword = await bcrypt.hash(password, 10)
-  await db.update(users).set({ hashedpassword: hashedPassword }).where(eq(users.id, row.userId))
-  await revokeAllSessions(row.userId)
-  return res.json({ success: true, message: 'Password updated. Please log in again.' })
 })
 export default router
