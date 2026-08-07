@@ -1,7 +1,7 @@
 import { queueConnection } from './src/queue/connection'
 import { Worker } from 'bullmq'
 
-new Worker(
+const emailWorker = new Worker(
   'email',
   async (job) => {
     switch (job.name) {
@@ -16,3 +16,7 @@ new Worker(
   },
   { connection: queueConnection },
 )
+
+emailWorker.on('failed', (job, err) => {
+  console.error(`email job ${job?.id} failed:`, err)
+})
