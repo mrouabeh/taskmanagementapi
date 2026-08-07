@@ -2,14 +2,21 @@ import { Router } from 'express'
 import { ConflictError, InternalError, UnauthorizedError, ValidationError } from '../lib/errors'
 import { auth } from '../middleware/auth'
 import { db } from '../db'
-import { users } from '../db/schema'
-import { eq } from 'drizzle-orm'
+import { passwordResetTokens, users } from '../db/schema'
 import { rateLimiter } from '../middleware/rateLimiter'
-import { loginUserSchema, registerUserSchema } from '../validation/auth.schema'
+import {
+  forgotPasswordSchema,
+  loginUserSchema,
+  registerUserSchema,
+  resetPasswordSchema,
+} from '../validation/auth.schema'
 import bcrypt from 'bcrypt'
 import jwt, { JwtPayload } from 'jsonwebtoken'
 import { env } from '../config/env'
 import { redisClient } from '../redis'
+import { createHash, randomBytes } from 'node:crypto'
+import { emailQueue } from '../queue/emailQueue'
+import { and, eq, gt } from 'drizzle-orm'
 const DUMMY_HASH = '$2b$10$KIqRWTBXtc/obFflqazVnuCWXlQynmdTqcjNJbKCwPheOxXpsFqEG'
 const router = Router()
 
@@ -221,6 +228,51 @@ router.post('/register', rateLimiter, async (req, res) => {
       id: newUser.id,
       email: newUser.email,
     },
+  })
+})
+router.post('/forgot-password', rateLimiter, async (req, res) => {
+  const result = forgotPasswordSchema.safeParse(req.body)
+  if (!result.success) throw new ValidationError(result.error.flatten())
+  const email = result.data.email.trim().toLowerCase()
+  const exists = await db.select().from(users).where(eq(users.email, email)).limit(1)
+  const user = exists[0]
+  if (user) {
+    const token = randomBytes(32).toString('base64url')
+    const tokenHash = createHash('sha256').update(token).digest('hex')
+    await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, user.id))
+    await db.insert(passwordResetTokens).values({
+      userId: user.id,
+      tokenHash,
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    })
+    await emailQueue.add('password-reset', { to: user.email, token })
+  }
+
+  return res.json({
+    success: true,
+    message: 'If that email is registered, a reset link has been sent.',
+  })
+})
+router.post('/reset-password', rateLimiter, async (req, res) => {
+  const result = resetPasswordSchema.safeParse(req.body)
+  if (!result.success) throw new ValidationError(result.error.flatten())
+  const { token: incomingToken, password } = result.data
+  const incomingTokenHash = createHash('sha256').update(incomingToken).digest('hex')
+  const [row] = await db
+    .delete(passwordResetTokens)
+    .where(
+      and(
+        eq(passwordResetTokens.tokenHash, incomingTokenHash),
+        gt(passwordResetTokens.expiresAt, new Date()),
+      ),
+    )
+    .returning({ userId: passwordResetTokens.userId })
+  if (!row) throw new UnauthorizedError('Invalid or expired reset token')
+  const hashedPassword = await bcrypt.hash(password, 10)
+  await db.update(users).set({ hashedpassword: hashedPassword }).where(eq(users.id, row.userId))
+  return res.json({
+    success: true,
+    message: 'Password was reset. Log in again',
   })
 })
 export default router

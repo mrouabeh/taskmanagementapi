@@ -198,3 +198,15 @@ export const users = pgTable(
   },
   (table) => [unique('users_pk_2').on(table.email)],
 )
+export const passwordResetTokens = pgTable(
+  'password_reset_tokens',
+  {
+    id: bigint({ mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+    userId: bigint('user_id', { mode: 'number' })
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [unique('password_reset_tokens_hash_key').on(table.tokenHash)],
+)

@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "tsx watch index.ts",
     "start": "tsx index.ts",
+    "worker": "tsx watch worker.ts",
     "test": "vitest",
     "typecheck": "tsc --noEmit",
     "db:up": "docker compose up -d",
@@ -16,14 +17,17 @@
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
+  "worker": "tsx watch worker.ts",
   "private": true,
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^9.1.0",
     "bcrypt": "^6.0.0",
+    "bullmq": "^6.0.7",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^1.0.0-rc.4",
     "express": "^5.2.1",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "openapi": "^1.0.0",
     "pg": "^8.22.0",
