@@ -1,4 +1,4 @@
-# Task Management Tool
+# Task Management API
 
 [![CI](https://github.com/mrouabeh/taskmanagementapi/actions/workflows/ci.yml/badge.svg)](https://github.com/mrouabeh/taskmanagementapi/actions/workflows/ci.yml)
 
