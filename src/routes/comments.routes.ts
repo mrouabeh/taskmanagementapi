@@ -9,6 +9,7 @@ import {
   updateCommentSchema,
 } from '../validation/comments.schema'
 import { ValidationError, NotFoundError, ForbiddenError } from '../lib/errors'
+import { paginationSchema } from '../validation/pagination.schema'
 
 const commentsRouter = Router({ mergeParams: true })
 
@@ -26,6 +27,9 @@ async function loadEditableComment(req: Request, commentId: number) {
 }
 
 commentsRouter.get('/', requireRole('member'), async (req, res) => {
+  const result = paginationSchema.safeParse(req.query)
+  if (!result.success) throw new ValidationError(result.error.flatten())
+  const { page, limit } = result.data
   const selected = await db
     .select({
       id: comments.id,
@@ -36,8 +40,15 @@ commentsRouter.get('/', requireRole('member'), async (req, res) => {
     })
     .from(comments)
     .where(eq(comments.taskId, req.task!.id))
-    .orderBy(asc(comments.createdAt))
-  res.status(200).json({ success: true, comments: selected })
+    .orderBy(asc(comments.createdAt), asc(comments.id))
+    .limit(limit + 1)
+    .offset((page - 1) * limit)
+  const hasMore = selected.length > limit
+  res.status(200).json({
+    success: true,
+    comments: selected.slice(0, limit),
+    pagination: { page, limit, hasMore },
+  })
 })
 
 commentsRouter.post('/', requireRole('member'), async (req, res) => {

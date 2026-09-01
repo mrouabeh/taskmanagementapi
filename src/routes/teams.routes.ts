@@ -3,11 +3,12 @@ import { db } from '../db'
 import { teams, projects } from '../db/schema'
 import { auth } from '../middleware/auth'
 import { loadMembership, requireRole } from '../middleware/requireRole'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { ValidationError, ConflictError, NotFoundError } from '../lib/errors'
 import { createTeamSchema, teamIdParamSchema, updateTeamSchema } from '../validation/teams.schema'
 import { loadTeam } from '../middleware/loadTeam'
 import projectRouter from './projects.routes'
+import { paginationSchema } from '../validation/pagination.schema'
 
 const teamRouter = Router({ mergeParams: true })
 
@@ -17,6 +18,9 @@ const teamRouter = Router({ mergeParams: true })
 teamRouter.use(auth, loadMembership)
 
 teamRouter.get('/', requireRole('member'), async (req, res) => {
+  const result = paginationSchema.safeParse(req.query)
+  if (!result.success) throw new ValidationError(result.error.flatten())
+  const { page, limit } = result.data
   const rows = await db
     .select({
       id: teams.id,
@@ -25,8 +29,13 @@ teamRouter.get('/', requireRole('member'), async (req, res) => {
     })
     .from(teams)
     .where(eq(teams.organizationId, req.membership!.organizationId))
-
-  res.status(200).json({ success: true, teams: rows })
+    .orderBy(desc(teams.createdAt), desc(teams.id))
+    .limit(limit + 1)
+    .offset((page - 1) * limit)
+  const hasMore = rows.length > limit
+  res
+    .status(200)
+    .json({ success: true, teams: rows.slice(0, limit), pagination: { page, limit, hasMore } })
 })
 
 teamRouter.post('/', requireRole('admin'), async (req, res) => {
@@ -59,6 +68,7 @@ teamRouter.get('/:teamId', requireRole('member'), async (req, res) => {
     .from(teams)
     .where(and(eq(teams.id, teamId), eq(teams.organizationId, req.membership!.organizationId)))
     .limit(1)
+
   if (!team) throw new NotFoundError('Team not found')
 
   res.status(200).json({ success: true, team })

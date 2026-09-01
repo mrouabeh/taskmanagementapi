@@ -2,11 +2,12 @@ import { Router } from 'express'
 import { db } from '../db'
 import { tasks, memberships } from '../db/schema'
 import { requireRole } from '../middleware/requireRole'
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { ValidationError, NotFoundError } from '../lib/errors'
 import { createTaskSchema, taskIdParamSchema, updateTaskSchema } from '../validation/tasks.schema'
 import commentRouter from './comments.routes'
 import { loadTask } from '../middleware/loadTask'
+import { paginationSchema } from '../validation/pagination.schema'
 
 const taskRouter = Router({ mergeParams: true })
 
@@ -29,8 +30,20 @@ async function assertAssigneeIsMember(
 }
 
 taskRouter.get('/', requireRole('member'), async (req, res) => {
-  const selected = await db.select().from(tasks).where(eq(tasks.projectId, req.project!.id))
-  res.status(200).json({ success: true, tasks: selected })
+  const result = paginationSchema.safeParse(req.query)
+  if (!result.success) throw new ValidationError(result.error.flatten())
+  const { page, limit } = result.data
+  const selected = await db
+    .select()
+    .from(tasks)
+    .where(eq(tasks.projectId, req.project!.id))
+    .orderBy(desc(tasks.createdAt), desc(tasks.id))
+    .limit(limit + 1)
+    .offset((page - 1) * limit)
+  const hasMore = selected.length > limit
+  res
+    .status(200)
+    .json({ success: true, tasks: selected.slice(0, limit), pagination: { page, limit, hasMore } })
 })
 
 taskRouter.post('/', requireRole('member'), async (req, res) => {
