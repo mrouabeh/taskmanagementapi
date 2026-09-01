@@ -3,7 +3,6 @@ import { ConflictError, InternalError, UnauthorizedError, ValidationError } from
 import { auth } from '../middleware/auth'
 import { db } from '../db'
 import { passwordResetTokens, users } from '../db/schema'
-import { rateLimiter } from '../middleware/rateLimiter'
 import {
   forgotPasswordSchema,
   loginUserSchema,
@@ -37,7 +36,7 @@ router.get('/me', auth, async (req, res) => {
   return res.json({ success: true, user: r[0] })
 })
 
-router.post('/login', rateLimiter, async (req, res) => {
+router.post('/login', async (req, res) => {
   const result = loginUserSchema.safeParse(req.body)
   if (!result.success) {
     throw new ValidationError(result.error.flatten())
@@ -98,7 +97,7 @@ router.post('/login', rateLimiter, async (req, res) => {
 })
 // No `auth` here — the access token is expected to be expired by the time a
 // client calls this. The refresh cookie is the only credential.
-router.post('/refresh', rateLimiter, async (req, res) => {
+router.post('/refresh', async (req, res) => {
   const presented = req.cookies.refreshToken
   if (!presented) throw new UnauthorizedError('Not authenticated')
 
@@ -182,7 +181,7 @@ router.post('/logout', auth, async (req, res) => {
   })
   return res.json({ success: true, message: 'Logged out' })
 })
-router.post('/register', rateLimiter, async (req, res) => {
+router.post('/register', async (req, res) => {
   const result = registerUserSchema.safeParse(req.body)
   if (!result.success) {
     throw new ValidationError(result.error.flatten())
@@ -230,7 +229,7 @@ router.post('/register', rateLimiter, async (req, res) => {
     },
   })
 })
-router.post('/forgot-password', rateLimiter, async (req, res) => {
+router.post('/forgot-password', async (req, res) => {
   const result = forgotPasswordSchema.safeParse(req.body)
   if (!result.success) throw new ValidationError(result.error.flatten())
   const email = result.data.email.trim().toLowerCase()
@@ -253,7 +252,7 @@ router.post('/forgot-password', rateLimiter, async (req, res) => {
     message: 'If that email is registered, a reset link has been sent.',
   })
 })
-router.post('/reset-password', rateLimiter, async (req, res) => {
+router.post('/reset-password', async (req, res) => {
   const result = resetPasswordSchema.safeParse(req.body)
   if (!result.success) throw new ValidationError(result.error.flatten())
   const { token: incomingToken, password } = result.data
