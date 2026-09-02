@@ -12,6 +12,10 @@ coverage/
 .claude/
 .agents/
 skills-lock.json
+CLAUDE.md
+
+# Scratch work, never part of the API
+learning/
 
 # Redis persistence dump (created at runtime, never source)
 dump.rdb
